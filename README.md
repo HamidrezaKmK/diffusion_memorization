@@ -1,118 +1,56 @@
-# Detecting, Explaining, and Mitigating Memorization in Diffusion Models
-Official repo for [Detecting, Explaining, and Mitigating Memorization in Diffusion Models](https://openreview.net/forum?id=84n3UwkH7b).
+# Detecting, Explaining, and Mitigating Memorization in Diffusion Models ( + geometric functionalities)
 
-If you have any questions, feel free to email Yuxin (<ywen@umd.edu>).
+This is a fork of the original repository, [Detecting, Explaining, and Mitigating Memorization in Diffusion Models](https://github.com/YuxinWenRick/diffusion_memorization). We have included some local intrinsic dimension (LID) functionalities for mitigating memorization to this repo. We use an LID estimator from the paper [A Geometric View of Data Complexity](https://arxiv.org/abs/2406.03537) which proposes a method that is differentiable by design and use that as a replacement for the classifier free oprimization (CFG) norm that was originally proposed in the paper. We adapt FLIPD for diffusion denoising implicit models (DDIM) that has been used to run the experiments in the paper. We also include pure score norm oprimization and see how it compares to the other two methods.
 
-## Dependencies
-- PyTorch == 1.13.0
-- transformers == 4.30.2
-- diffusers == 0.18.2
-- accelerate == 0.21.0
-- datasets
+In addition to that, we have also included a GPT-based method for prompt perturbation using token attributions obtained from these methods. For the base functionalities, please consult the original repository.
 
-## Play around our methods
-We provide detecting, explaining, and (inference) mitigating methods separately in the Jupyter notebooks within the `examples/` folder. You can directly interact with our methods without the need to download any datasets or fine-tune any models.
+**Note**: For all the command-line scripts here, you have control over the configuration and hyperparameters with [hydra](https://hydra.cc/), please check `configs/` for more details.
 
-## To reproduce the results in our paper
-### Detect memorization
-1. Run detection:
+## Setting up environment
 
-memorized prompts
-```
-python detect_mem.py --run_name memorized_prompts --dataset examples/sdv1_500_memorized.jsonl --end 500 --gen_seed 0
+Run the following script to set up the environment:
+
+```bash
+conda env create -f env.yml
+conda activate geometric_diffusion_memorization
 ```
 
-non-memorized prompts
-```
-python detect_mem.py --run_name non_memorized_prompts --dataset Gustavosta/Stable-Diffusion-Prompts --end 500 --gen_seed 0
+## Prompt attribution
+
+When running the following script, it will take prompts that are stored in the `match_verbatim_captions.json` and run attribution methods on them. Attribution methods basically take a caption and see how influential a token is for memorization. We have three attribution methods, `cfg_norm`, `score_norm`, and `flipd`. The first one is what was proposed in the original paper, the second one is a simple score norm, and the third one is the LID-based method.
+
+```bash
+# get the token attributions for a set of memorized prompts
+python store_attributions.py attribution_method=<score_norm|cfg_norm|flipd>
 ```
 
-2. Visualize resuts: you could use `examples/det_mem_viz.ipynb`.
+This will store a json file in `outputs/attributions` that contains all the token attributions obtained via any of the metrics above! Note that you can also specify your own set of prompts.
 
-### Explain memorization
-You could check out `examples/token_wise_significance.ipynb`.
+### Perturbation
 
-### Mitigate memorization
-For our mitigation experiments, we fine-tune stable diffusion models on LAION to experiment with memorized examples with more meaningful prompts.
+After obtaining these attributions, we can use that information to perturb the prompts. For that, we will use the OpenAI API to generate new relevant prompts that do not contain these sensitive tokens that are causing memorization.
+Prompt perturbation is done through our `perturb_gpt.py` script. Before that, you have to store your `OPENAI_API_KEY` in a `.env` file in the root directory of this repo, meaning, you should have a file `.env` with the following content:
 
-You could either use our fine-tuned models by downloading the pre-fine-tuned [checkpoint](https://drive.google.com/drive/folders/1XiYtYySpTUmS_9OwojNo4rsPbkfCQKBl?usp=sharing) and [memorized images](https://drive.google.com/drive/folders/1oQ49pO9gwwMNurxxVw7jwlqHswzj6Xbd?usp=sharing) or fine-tune the model with the following instruction:
-
-### Fine-tune Stable Diffusion model
-```
-accelerate launch --mixed_precision=fp16 train_text_to_image.py --dataset=$MEM_DATA --non_mem_dataset=$NON_MEM_DATA --output_dir=finetuned_checkpoints/v1-20000 --pretrained_model_name_or_path=CompVis/stable-diffusion-v1-4 --end=200 --repeats=200 --non_mem_ratio=3 --use_ema --resolution=512 --center_crop --train_batch_size=8 --gradient_accumulation_steps=1 --gradient_checkpointing --max_train_steps=20000 --checkpointing_steps=20000 --learning_rate=1e-05 --max_grad_norm=1 --lr_scheduler=constant --lr_warmup_steps=0
+```bash
+OPENAI_API_KEY='<your-key>'
 ```
 
-`dataset` and `non_mem_dataset` should provide the path to the dataset you want to memorize and the base dataset respectively.
+You can then run the following script:
 
-By default, the code assumes the data folder that contains the image and text pairs looks like:
-```
--- daataset
-    |-- 00000001.jpg
-    |-- 00000001.txt
-    |-- 00000002.jpg
-    |-- 00000002.txt
-    |-- ...
+```bash
+python perturb_gpt.py attribution_method=<score_norm|cfg_norm|flipd|random>
 ```
 
-### Inference-time mititgation
-You may want to download the SSCD checkpoint first [here](https://drive.google.com/file/d/1PAMwyK5b5zi6WBvyENtWuWr0lpT-TYMk/view?usp=sharing).
+This script looks at the already stored attributions in `outputs/attributions`, therefore, make sure to run the last part first before running this script -- we have however included some default attributions in the repo. Note that we also have a `random` method that perturbs the prompts randomly. Finally, after running this script all the perturbed prompts will be stored in a separate file in `outputs/perturbed_prompts`.
 
-No mitigation:
-```
-python inference_mem.py --run_name no_mitigation --unet_id finetuned_checkpoints/checkpoint-20000/unet --dataset memorized_images --end 200 --gen_seed 0 --reference_model ViT-g-14 --with_tracking
-```
+### Generating Samples with Perturbed Prompts
 
-Random token addition baseline:
-```
-python inference_mem.py --run_name add_rand_word --unet_id finetuned_checkpoints/checkpoint-20000/unet --dataset memorized_images --end 200 --gen_seed 0 --prompt_aug_style rand_word_add --repeat_num 4 --reference_model ViT-g-14 --with_tracking
-```
+## Prompt Optimization
 
-Ours:
-```
-python inference_mem.py --run_name ours --unet_id finetuned_checkpoints/checkpoint-20000/unet --dataset memorized_images --end 200 --gen_seed 0 --optim_target_loss 3 --optim_target_steps 0 --reference_model ViT-g-14 --with_tracking
+This method is the analogue of the main inference-time mitigation method described in [Detecting, Explaining, and Mitigating Memorization in Diffusion Models](https://github.com/YuxinWenRick/diffusion_memorization), where during the generation process, a prompt embedding is optimized to minimize the memorization metric, which in that case was the CFG norm. We have also included the LID-based method and also included the score norm method. You can run the following script to optimize the prompts:
+
+```bash
+python inference_time_mitigation_optimization.py mitigation_method=<score_norm|cfg_norm|flipd>
 ```
 
-### Training-time mitigation
-No mitigation:
-```
-accelerate launch --mixed_precision=fp16 train_text_to_image.py --dataset=$MEM_DATA --non_mem_dataset=$NON_MEM_DATA --output_dir=finetuned_checkpoints/no_mitigation --pretrained_model_name_or_path=CompVis/stable-diffusion-v1-4 --end=200 --repeats=200 --non_mem_ratio=3 --use_ema --resolution=512 --center_crop --train_batch_size=8 --gradient_accumulation_steps=1 --gradient_checkpointing --max_train_steps=20000 --checkpointing_steps=20000 --learning_rate=1e-05 --max_grad_norm=1 --lr_scheduler=constant --lr_warmup_steps=0
-```
-
-Random token addition baseline:
-```
-accelerate launch --mixed_precision=fp16 train_text_to_image.py --dataset=$MEM_DATA --non_mem_dataset=$NON_MEM_DATA --output_dir=finetuned_checkpoints/add_rand_word --pretrained_model_name_or_path=CompVis/stable-diffusion-v1-4 --end=200 --repeats=200 --non_mem_ratio=3 --use_ema --resolution=512 --center_crop --train_batch_size=8 --gradient_accumulation_steps=1 --gradient_checkpointing --max_train_steps=20000 --checkpointing_steps=20000 --learning_rate=1e-05 --max_grad_norm=1 --lr_scheduler=constant --lr_warmup_steps=0 --prompt_aug_style rand_word_add --repeat_num 1
-```
-
-Ours:
-```
-accelerate launch --mixed_precision=fp16 train_text_to_image.py --dataset=$MEM_DATA --non_mem_dataset=$NON_MEM_DATA --output_dir=finetuned_checkpoints/ours --pretrained_model_name_or_path=CompVis/stable-diffusion-v1-4 --end=200 --repeats=200 --non_mem_ratio=3 --use_ema --resolution=512 --center_crop --train_batch_size=8 --gradient_accumulation_steps=1 --gradient_checkpointing --max_train_steps=20000 --checkpointing_steps=20000 --learning_rate=1e-05 --max_grad_norm=1 --lr_scheduler=constant --lr_warmup_steps=0 --hard_threshold 2
-```
-
-Then, you can use the fnference-time mititgation script to evaluate the memorization:
-```
-python run_mem.py --run_name baseline --unet_id finetuned_checkpoints/checkpoint-20000/unet --dataset memorized_images --end 200 --gen_seed 0 --reference_model ViT-g-14 --with_tracking
-```
-
-### Calculate memorization with sdv1_500_memorized.jsonl
-You can first download all the groundtruth images [here](https://drive.google.com/file/d/1mdhkyTlDBZIW6LaO_Q1J3roaU2Be0Nvo/view?usp=sharing).
-
-Then, run
-```
-python inference_mem.py --run_name no_mitigation --dataset sdv1_500_mem_groundtruth --end 500 --gen_seed 0 --reference_model ViT-g-14 --with_tracking
-```
-
-## Suggestions and pull requests are welcome!
-
-## Cite our work
-If you find this work useful, please cite our paper:
-
-```bibtex
-@inproceedings{
-wen2024detecting,
-title={Detecting, Explaining, and Mitigating Memorization in Diffusion Models},
-author={Yuxin Wen and Yuchen Liu and Chen Chen and Lingjuan Lyu},
-booktitle={The Twelfth International Conference on Learning Representations},
-year={2024},
-url={https://openreview.net/forum?id=84n3UwkH7b}
-}
-```
+Similar to the perturbation script, this script also looks at prompts that are stored in the `match_verbatim_captions.json` file. After running this script, the optimized prompts thorough the history of optimization will be passed through the generator network and stored in `outputs/inference_time_mitigation`. There are examples already stored in the repo.
