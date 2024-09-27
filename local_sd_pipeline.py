@@ -685,7 +685,6 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                             )
                             flipd = - torch.sqrt(1 - alpha_bar) * flipd_trace_term + flipd_score_norm_term # (+ D) but doesn't matter
                             loss = -flipd.mean()
-                            print("HOWDY!")
                         else:
                             raise ValueError(f"method {method} not supported")
                     

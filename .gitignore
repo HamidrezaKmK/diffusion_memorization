@@ -169,3 +169,6 @@ memorized_images/
 *.zip
 *.pt
 *groundtruth
+
+# for logs
+outputs
