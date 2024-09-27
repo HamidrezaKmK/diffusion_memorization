@@ -531,6 +531,7 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
         optim_epsilon=None,
         alpha=0.5,
         method: Literal["cfg_norm", "flipd", "score_norm"] = "cfg_norm",
+        return_history: bool = False,
     ):
         # 0. Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
@@ -607,7 +608,8 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                     prompt_tokens = prompt_tokens[:75]
 
                     curr_learnabel_mask = list(set(range(77)) - set([0]))
-
+                    if return_history:
+                        optim_history = []
                     for j in range(optim_iters):
                         if print_optim is True or optim_epsilon is not None:
                             with torch.no_grad():
@@ -643,7 +645,10 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                                 ),
                             ]
                         )
-
+                        if return_history and len(optim_history) == 0:
+                            cloned = single_prompt_embeds.clone().detach()
+                            cloned.requires_grad = False
+                            optim_history.append(cloned)
                         noise_pred = self.unet(
                             latent_model_input,
                             t,
@@ -723,13 +728,18 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
 
                         optimizer.step()
                         optimizer.zero_grad()
-
+                        if return_history:
+                            cloned = single_prompt_embeds.clone().detach()
+                            cloned.requires_grad = False
+                            optim_history.append(cloned)
                         if print_optim is True:
                             print(f"step: {j}, curr loss: {loss_item}")
 
                     single_prompt_embeds = single_prompt_embeds.detach()
                     single_prompt_embeds.requires_grad = False
                     torch.cuda.empty_cache()
+                    if return_history:
+                        return optim_history
                     return single_prompt_embeds
 
                     with torch.no_grad():
