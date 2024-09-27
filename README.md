@@ -5,6 +5,7 @@ This is a fork of the original repository, [Detecting, Explaining, and Mitigatin
 In addition to that, we have also included a GPT-based method for prompt perturbation using token attributions obtained from these methods. For the base functionalities, please consult the original repository.
 
 **Remark 1**: For all the command-line scripts here, you have control over the configuration and hyperparameters with [hydra](https://hydra.cc/), please check `configs/` for more details.
+
 **Remark 2**: All the logs in this project will be stored in the `outputs` directory. There are also some default logs stored in the repo to get to know the structure of the logs.
 
 ## Setting up environment
