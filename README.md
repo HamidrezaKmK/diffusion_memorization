@@ -4,7 +4,8 @@ This is a fork of the original repository, [Detecting, Explaining, and Mitigatin
 
 In addition to that, we have also included a GPT-based method for prompt perturbation using token attributions obtained from these methods. For the base functionalities, please consult the original repository.
 
-**Note**: For all the command-line scripts here, you have control over the configuration and hyperparameters with [hydra](https://hydra.cc/), please check `configs/` for more details.
+**Remark 1**: For all the command-line scripts here, you have control over the configuration and hyperparameters with [hydra](https://hydra.cc/), please check `configs/` for more details.
+**Remark 2**: All the logs in this project will be stored in the `outputs` directory. There are also some default logs stored in the repo to get to know the structure of the logs.
 
 ## Setting up environment
 
@@ -42,8 +43,6 @@ python perturb_gpt.py attribution_method=<score_norm|cfg_norm|flipd|random>
 ```
 
 This script looks at the already stored attributions in `outputs/attributions`, therefore, make sure to run the last part first before running this script -- we have however included some default attributions in the repo. Note that we also have a `random` method that perturbs the prompts randomly. Finally, after running this script all the perturbed prompts will be stored in a separate file in `outputs/perturbed_prompts`.
-
-### Generating Samples with Perturbed Prompts
 
 ## Prompt Optimization
 
