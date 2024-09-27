@@ -1,9 +1,12 @@
+from typing import Literal
+
 import torch
 
 from diffusers import StableDiffusionPipeline
 from diffusers.utils import randn_tensor
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
-
+from diffusers.schedulers import DDIMScheduler
+from flipd_utils import compute_trace_of_jacobian
 
 # credit: https://stackoverflow.com/questions/67370107/how-to-sample-similar-vectors-given-a-vector-and-cosine-similarity-in-pytorch
 def torch_cos_sim(v, cos_theta, n_vectors=1, EXACT=True):
@@ -336,6 +339,7 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
         prompt_embeds=None,
         negative_prompt_embeds=None,
         target_steps=[0],
+        method: Literal["cfg_norm", "flipd", "score_norm"] = "cfg_norm",
     ):
         # 0. Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
@@ -420,13 +424,46 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
 
                     noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                     noise_pred_text = noise_pred_text - noise_pred_uncond
-                    noise_pred_text_norm = torch.norm(noise_pred_text, p=2).mean()
-                    loss = noise_pred_text_norm
+                    
+                    if method == "score_norm":
+                        loss = torch.norm(noise_pred_uncond + guidance_scale * noise_pred_text, p=2).mean()
+                        (token_grads,) = torch.autograd.grad(loss, [prompt_embeds])
+                    elif method == "cfg_norm":
+                        loss = torch.norm(noise_pred_text, p=2).mean()
+                        (token_grads,) = torch.autograd.grad(loss, [prompt_embeds])
+                    elif method == "flipd":
+                        alpha_bar = self.scheduler.alphas_cumprod[t]
+                        def score_fn(x):
+                            noise_uncond, noise_pred_text = self.unet(
+                                torch.cat([x, x]),
+                                t,
+                                encoder_hidden_states=torch.cat([dummy_prompt_embeds.repeat(x.shape[0], 1, 1),single_prompt_embeds.repeat(x.shape[0], 1, 1)]),
+                                cross_attention_kwargs=None,
+                                return_dict=False,
+                            )[0].chunk(2)
+                            return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_uncond)
+                        flipd_trace_term = compute_trace_of_jacobian(
+                            score_fn,
+                            x=latents,
+                            method="hutchinson_gaussian",
+                            hutchinson_sample_count=1,
+                            chunk_size=1,
+                            seed=42,
+                            verbose=False,
+                        )
+                        flipd_score_norm_term = torch.norm(
+                            noise_pred_uncond + guidance_scale * noise_pred_text, p=2
+                        )
+                        flipd = - torch.sqrt(1 - alpha_bar) * flipd_trace_term + flipd_score_norm_term # (+ D) but doesn't matter
+                        loss = -flipd.mean()
+                        (token_grads,) = torch.autograd.grad(loss, [prompt_embeds])
+                    else:
+                        raise ValueError(f"method {method} not supported")
+                    
 
-                    (token_grads,) = torch.autograd.grad(loss, [prompt_embeds])
                     token_grads = token_grads.norm(p=2, dim=-1).mean(dim=0).detach()
                     all_token_grads.append(token_grads)
-
+                    
                     with torch.no_grad():
                         noise_pred = (
                             noise_pred_uncond + guidance_scale * noise_pred_text
@@ -442,6 +479,8 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                     if i == max(target_steps):
                         torch.cuda.empty_cache()
                         return torch.mean(torch.stack(all_token_grads), dim=0)
+                    # delete unused variables
+                    del loss, token_grads, noise_pred, noise_pred_uncond, noise_pred_text
                 else:
                     with torch.no_grad():
                         noise_pred = self.unet(
@@ -491,6 +530,7 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
         print_optim=False,
         optim_epsilon=None,
         alpha=0.5,
+        method: Literal["cfg_norm", "flipd", "score_norm"] = "cfg_norm",
     ):
         # 0. Default height and width to unet
         height = height or self.unet.config.sample_size * self.vae_scale_factor
@@ -615,8 +655,40 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                         noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
                         noise_pred_text = noise_pred_text - noise_pred_uncond
 
-                        noise_pred_text_norm = torch.norm(noise_pred_text, p=2).mean()
-                        loss = noise_pred_text_norm
+                        
+                        if method == "score_norm":
+                            loss = torch.norm(noise_pred_uncond + guidance_scale * noise_pred_text, p=2).mean()
+                        elif method == "cfg_norm":
+                            loss = torch.norm(noise_pred_text, p=2).mean()
+                        elif method == "flipd":
+                            alpha_bar = self.scheduler.alphas_cumprod[t]
+                            def score_fn(x):
+                                noise_uncond, noise_pred_text = self.unet(
+                                    torch.cat([x, x]),
+                                    t,
+                                    encoder_hidden_states=torch.cat([dummy_prompt_embeds.repeat(x.shape[0], 1, 1),single_prompt_embeds.repeat(x.shape[0], 1, 1)]),
+                                    cross_attention_kwargs=None,
+                                    return_dict=False,
+                                )[0].chunk(2)
+                                return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_uncond)
+                            flipd_trace_term = compute_trace_of_jacobian(
+                                score_fn,
+                                x=latents,
+                                method="hutchinson_gaussian",
+                                hutchinson_sample_count=1,
+                                chunk_size=1,
+                                seed=42,
+                                verbose=False,
+                            )
+                            flipd_score_norm_term = torch.norm(
+                                noise_pred_uncond + guidance_scale * noise_pred_text, p=2
+                            )
+                            flipd = - torch.sqrt(1 - alpha_bar) * flipd_trace_term + flipd_score_norm_term # (+ D) but doesn't matter
+                            loss = -flipd.mean()
+                            print("HOWDY!")
+                        else:
+                            raise ValueError(f"method {method} not supported")
+                    
                         loss_item = loss.item()
 
                         if optim_epsilon is not None and l_2 > optim_epsilon:
