@@ -28,8 +28,8 @@ def main(cfg: DictConfig):
         mem_captions = json.load(f)
 
     # load the json with the attributions
-    image_path = os.path.join(cfg.out_dir, "inference_time_mitigation", cfg.mitigation_method.name, "images")
-    prompt2image_path = os.path.join(cfg.out_dir, "inference_time_mitigation", cfg.mitigation_method.name, "prompt2image.json")
+    image_path = os.path.join(cfg.out_dir, "inference_time_mitigation_optimization", cfg.mitigation_method.name, "images")
+    prompt2image_path = os.path.join(cfg.out_dir, "inference_time_mitigation_optimization", cfg.mitigation_method.name, "prompt2image.json")
     if not os.path.exists(image_path):
         os.makedirs(image_path, exist_ok=True)
         with open(prompt2image_path, 'w') as f:
