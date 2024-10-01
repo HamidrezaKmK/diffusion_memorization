@@ -7,6 +7,7 @@ from diffusers.utils import randn_tensor
 from diffusers.pipelines.stable_diffusion import StableDiffusionPipelineOutput
 from diffusers.schedulers import DDIMScheduler
 from flipd_utils import compute_trace_of_jacobian
+import math
 
 # credit: https://stackoverflow.com/questions/67370107/how-to-sample-similar-vectors-given-a-vector-and-cosine-similarity-in-pytorch
 def torch_cos_sim(v, cos_theta, n_vectors=1, EXACT=True):
@@ -426,6 +427,7 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                     noise_pred_text = noise_pred_text - noise_pred_uncond
                     
                     if method == "score_norm":
+                        alpha_bar = self.scheduler.alphas_cumprod[t]
                         loss = torch.norm(noise_pred_uncond + guidance_scale * noise_pred_text, p=2).mean()
                         (token_grads,) = torch.autograd.grad(loss, [prompt_embeds])
                     elif method == "cfg_norm":
@@ -662,7 +664,8 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
 
                         
                         if method == "score_norm":
-                            loss = torch.norm(noise_pred_uncond + guidance_scale * noise_pred_text, p=2).mean()
+                            alpha_bar = self.scheduler.alphas_cumprod[t]
+                            loss = torch.norm(noise_pred_uncond + guidance_scale * noise_pred_text, p=2).mean() / (1 - alpha_bar)
                         elif method == "cfg_norm":
                             loss = torch.norm(noise_pred_text, p=2).mean()
                         elif method == "flipd":
@@ -676,6 +679,7 @@ class LocalStableDiffusionPipeline(StableDiffusionPipeline):
                                     return_dict=False,
                                 )[0].chunk(2)
                                 return noise_pred_uncond + guidance_scale * (noise_pred_text - noise_uncond)
+                            tweedie_estimate = latents + (noise_pred_uncond + guidance_scale * noise_pred_text) * (1 - alpha_bar)
                             flipd_trace_term = compute_trace_of_jacobian(
                                 score_fn,
                                 x=latents,

@@ -29,6 +29,7 @@ def plot_bars_raw(
     legend_loc: Optional[str] = None,
     clear_ylabel: bool = False,
     clear_yticks: bool = False,
+    no_hashlines: bool = False,
 ):
     """
     Creates a barplot with the x-axis labelled according to x_values. 
@@ -59,7 +60,7 @@ def plot_bars_raw(
             width=bar_width,
             color=color,
             label=label,
-            hatch=hashlines[i % len(hashlines)]  # Apply hatch pattern
+            hatch=hashlines[(i + 3) % len(hashlines)] if not no_hashlines else None,  # Apply hatch pattern
         )
 
     if y_label:
@@ -118,6 +119,7 @@ def plot_kde_raw(
     clear_ylabel: bool = False,
     clear_yticks: bool = False,
     show_scale: bool = True,
+    no_hashlines: bool = False,
 ):
     """
     Plots KDE for given data.
@@ -141,7 +143,7 @@ def plot_kde_raw(
     idx = 0
     for x, label, color in zip(x_values, labels, colors):
         density = sns.kdeplot(x, bw_adjust=0.5, color=color).get_lines()[-1].get_data()
-        ax.fill_between(density[0], 0, density[1] , color=color, label=label, alpha=0.5, hatch=hashlines[idx % len(hashlines)])
+        ax.fill_between(density[0], 0, density[1] , color=color, label=label, alpha=0.5, hatch=hashlines[idx % len(hashlines)] if not no_hashlines else None)
         idx += 1
     
     y_label = y_label or 'Density'
